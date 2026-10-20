@@ -11,7 +11,7 @@ localStorage မှာ မှတ်ထားတယ် (Streamlit Secrets / env �
 1. **Video တင်** → ffmpeg နဲ့ audio ထုတ် (mp3 16k mono 32k)
 2. **Groq Whisper** (`whisper-large-v3`) → စကားပြော + timestamps
    (ဖိုင်ကြီးရင် အပိုင်းခွဲပြီး အလိုအလျောက် ဆက်ပေးတယ်)
-3. **Gemini** (`gemini-2.5-flash`, sidebar မှာ model ပြောင်းလို့ရ) → Mode အလိုက် Script:
+3. **Gemini** (`gemini-3.8-flash`, sidebar မှာ model ပြောင်းလို့ရ) → Mode အလိုက် Script:
    - 🎬 **Recap** — frames (vision) + transcript → scenes script
      (Script Style: Movie Recap / Documentary / Storytelling / Viral Short)
    - 💬 **Subtitle** — dialogue တွေ မြန်မာ ဘာသာပြန် (အချိန်ကိုက်၊ SRT ရတယ်)

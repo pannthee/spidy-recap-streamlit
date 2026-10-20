@@ -40,8 +40,8 @@ import streamlit as st
 
 # ------------------------------------------------------------------ constants
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
-GEMINI_TEXT_MODEL_DEFAULT = "gemini-2.5-flash"        # ONC_1 က သုံးတဲ့ model
-GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"      # ONC_1 က သုံးတဲ့ TTS model
+GEMINI_TEXT_MODEL_DEFAULT = "gemini-3.8-flash"        # 2.5-flash retired (404, 2026-10-21 live error)
+GEMINI_TTS_MODEL = "gemini-3.8-flash-tts"              # 2.5-flash-preview-tts လည်း retired မို့ ကြိုပြောင်း
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MODEL = "whisper-large-v3"  # turbo က hallucination များလို့ full model
 
