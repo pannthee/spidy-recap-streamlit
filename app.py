@@ -1026,7 +1026,9 @@ with st.sidebar:
         _ls_set(localS, _LS_GEMINI, typed_g, "ls_set_gemini")
     gemini_key = typed_g or env_gemini
     st.markdown("🔑 အလကားယူရန်: [aistudio.google.com/apikey](https://aistudio.google.com/apikey)")
-    st.success("✅ Gemini key ရှိတယ်") if gemini_key else \
+    if gemini_key:
+        st.success("✅ Gemini key ရှိတယ်")
+    else:
         st.warning("⚠️ Gemini key မရှိသေးဘူး (အဆင့် ၂ အတွက်လိုတယ်)")
 
     env_groq = _secret("GROQ_API_KEY")
@@ -1042,7 +1044,9 @@ with st.sidebar:
         _ls_set(localS, _LS_GROQ, typed_q, "ls_set_groq")
     groq_key = typed_q or env_groq
     st.markdown("🔑 အလကားယူရန်: [console.groq.com/keys](https://console.groq.com/keys)")
-    st.success("✅ Groq key ရှိတယ်") if groq_key else \
+    if groq_key:
+        st.success("✅ Groq key ရှိတယ်")
+    else:
         st.warning("⚠️ Groq key မရှိသေးဘူး (အဆင့် ၂ အတွက်လိုတယ်)")
 
     if st.button("🔑 သိမ်းထားတဲ့ key တွေ ဖျက်", use_container_width=True):
