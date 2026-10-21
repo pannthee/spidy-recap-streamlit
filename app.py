@@ -677,6 +677,23 @@ SCRIPT:
     return parse_gemini_json(_gemini_text(api_key, model, [{"text": prompt}]))
 
 
+def gen_title_hashtags(api_key, model, script_text):
+    """📌 Title & Hashtags — Final Render ပြီးရင် ပြဖို့ (user spec 2026-10-21)."""
+    prompt = f"""Based on this movie recap script, generate a Title and Hashtags for posting the video.
+Return EXACTLY this JSON structure:
+{{
+  "title": "...",
+  "hashtags": ["#MovieRecap", "#...", "#..."]
+}}
+Rules:
+- title: ONE click-worthy title written in Burmese (Myanmar language), based on the main plot twist or the most interesting event in the story. Make it irresistible to click, but do NOT fully spoil the ending.
+- hashtags: 5 to 8 targeted hashtags that maximize reach on YouTube Shorts, TikTok and Facebook Reels. Mix Burmese and English (examples: #MovieRecap #ရုပ်ရှင်ဇာတ်လမ်း #Review). Every hashtag must start with #.
+
+SCRIPT:
+{script_text[:6000]}"""
+    return parse_gemini_json(_gemini_text(api_key, model, [{"text": prompt}]))
+
+
 # ------------------------------------------------------------------ TTS
 def _edge_rate(speed):
     pct = int(round((float(speed) - 1.0) * 100))
@@ -1079,6 +1096,7 @@ def render_final(S, cfg, progress_cb=None):
 S = st.session_state
 for _k, _v in [("mode", "recap"), ("items", []), ("segments", None),
                ("audio_path", None), ("sync", None), ("social", None),
+               ("title_tags", None),
                ("final_path", None), ("sub_items", []), ("video_path", None),
                ("video_dur", 0.0), ("run_dir", None), ("script_done", False)]:
     if _k not in S:
@@ -1200,7 +1218,7 @@ mode = st.radio("Processing Mode", MODES, horizontal=True,
 if mode != S["mode"]:
     S["mode"] = mode
     S.update(items=[], audio_path=None, sync=None, final_path=None,
-             sub_items=[], script_done=False)
+             sub_items=[], script_done=False, title_tags=None)
 st.caption({
     "recap": "AI Vision က Video တစ်ခုလုံးစာ (Full Duration) အကျဉ်းချုပ် Script ရေးပေးမည်။",
     "subtitle": "မူရင်းအသံကို မဖျောက်ဘဲ စကားပြောများကို မြန်မာလို အချိန်ကိုက် စာတန်းထိုးပေးမည်။",
@@ -1225,7 +1243,7 @@ if up is not None:
         S.update(video_path=str(vpath), run_dir=str(run_dir),
                  video_dur=dur(vpath), items=[], segments=None,
                  audio_path=None, sync=None, final_path=None,
-                 sub_items=[], script_done=False)
+                 sub_items=[], script_done=False, title_tags=None)
     st.caption(f"✅ Video ရပြီ — ⏱️ Duration: {fmt_clock(S['video_dur'])} ({S['video_dur']:.1f}s)")
 
 # ------------------------------------------------------------- step 2: script
@@ -1385,6 +1403,15 @@ if st.button("🎬 Final Video Render လုပ်မယ်", use_container_widt
         S["final_path"] = render_final(S, cfg, progress_cb=_rcb)
         bar.progress(1.0, "🎬 Render ပြီးပြီ ✅ 100%")
         st.success("Render ပြီးပြီ ✅")
+        # 📌 Title & Hashtags — render ပြီးတာနဲ့ အလိုအလျောက် ထုတ်
+        if gemini_key:
+            try:
+                with st.spinner("📌 Title & Hashtags ရေးနေတယ်..."):
+                    S["title_tags"] = gen_title_hashtags(
+                        gemini_key, model_id.strip() or GEMINI_TEXT_MODEL_DEFAULT,
+                        "\n".join(d["text"] for d in S["items"]))
+            except Exception:
+                S["title_tags"] = None
     except Exception as e:
         st.error(str(e))
 
@@ -1405,6 +1432,30 @@ if S.get("final_path") and os.path.isfile(S["final_path"]):
             st.download_button("⬇️ မူရင်း Transcript SRT",
                                build_srt(S["segments"]).encode("utf-8"),
                                file_name="transcript.srt", mime="text/plain")
+
+    # 📌 TITLE & HASHTAGS (render ပြီးမှ ပြ)
+    st.markdown("#### 📌 TITLE & HASHTAGS")
+    _tt = S.get("title_tags")
+    if _tt:
+        _tags = " ".join(_tt.get("hashtags", []))
+        st.markdown(f"📌 **Title:** {_tt.get('title', '')}")
+        st.markdown(f"🏷️ **Hashtags:** {_tags}")
+        st.code(f"📌 Title: {_tt.get('title', '')}\n\n🏷️ Hashtags: {_tags}",
+                language=None)
+        st.caption("⬆️ အပေါ်က box ညာဘက်အပေါ်က copy ခလုတ်နဲ့ တစ်ခါတည်း ကူးလို့ရတယ်")
+    if st.button("🔄 Title & Hashtags အသစ်ထုတ်" if _tt else
+                 "📌 Title & Hashtags ထုတ်မယ်"):
+        if not gemini_key:
+            st.error("⚠️ Gemini API key လိုတယ်")
+        else:
+            try:
+                with st.spinner("📌 Title & Hashtags ရေးနေတယ်..."):
+                    S["title_tags"] = gen_title_hashtags(
+                        gemini_key, model_id.strip() or GEMINI_TEXT_MODEL_DEFAULT,
+                        "\n".join(d["text"] for d in S["items"]))
+                st.rerun()
+            except Exception as e:
+                st.error(f"Title & Hashtags မရဘူး — {e}")
 
 st.markdown('<div class="credit">Create by Bo Bo Myint Mo • Movie Recap Studio — Streamlit Edition</div>',
             unsafe_allow_html=True)
