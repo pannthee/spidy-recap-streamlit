@@ -946,6 +946,8 @@ def render_final(S, cfg, progress_cb=None):
     progress_cb(0.0–1.0): Hyper-Sync အဆင့် 0–35%, main render 35–100%."""
     work_dir = Path(S["run_dir"])
     mode = S["mode"]
+    if mode != "subtitle":
+        cfg["orig_vol"] = 0  # Subtitle Mode မှလွဲ မူရင်းအသံ လုံးဝဖျောက်
     W, H = auto_canvas(S["video_path"])  # video အချိုးအတိုင်း အလိုအလျောက်
     portrait = H > W
     src_video = S["video_path"]
@@ -1378,8 +1380,7 @@ if st.button("🎬 Final Video Render လုပ်မယ်", use_container_widt
                    blur_w=None, blur_h=None, blur_strength=30, logo_path=None,
                    logo_pos="top-right", logo_size=15, logo_opacity=100,
                    bgm_path=None, tts_vol=100,
-                   orig_vol=(10 if mode in ("dubbing", "recap_dub") else
-                             (100 if mode == "subtitle" else 0)),
+                   orig_vol=(100 if mode == "subtitle" else 0),
                    bgm_vol=20)
         bar = st.progress(0.0, "🎬 Render စတင်နေတယ်... 0%")
 

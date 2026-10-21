@@ -132,6 +132,43 @@ def test_auto_canvas_and_portrait_render():
     assert "\\an8\\pos(540," in ass, ass[:600]
 
 
+def test_no_original_audio_outside_subtitle():
+    """Recap mode: cfg orig_vol=100 ပေးတောင် မူရင်းအသံ (noise) မပါရ."""
+    wd = HERE / "work" / "noorig"
+    wd.mkdir(parents=True, exist_ok=True)
+    vid = wd / "src.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                    "-i", "testsrc2=size=320x180:rate=30:duration=4",
+                    "-f", "lavfi", "-i", "anoisesrc=color=white:duration=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest", str(vid)], check=True)
+    tts = wd / "tts.mp3"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                    "-i", "sine=frequency=660:duration=4",
+                    "-c:a", "libmp3lame", str(tts)], check=True)
+    S = {"run_dir": str(wd), "mode": "recap", "video_path": str(vid),
+         "sync": None, "audio_path": str(tts),
+         "items": [{"start": 0.0, "end": 4.0, "duration": 4.0, "text": "x"}],
+         "sub_items": []}
+    cfg = dict(aspect="16:9", mirror=False, color_tone="Normal (Original)",
+               hypersync=False, subs_on=False, sub_color="#FFFFFF",
+               sub_bg="#000000", sub_size=None, sub_bg_op=60, sub_x=None,
+               sub_y=None, blur_on=False, blur_x=None, blur_y=None,
+               blur_w=None, blur_h=None, blur_strength=30, logo_path=None,
+               logo_pos="top-right", logo_size=15, logo_opacity=100,
+               bgm_path=None, tts_vol=100, orig_vol=100, bgm_vol=20)
+    out = app.render_final(S, cfg)
+    # TTS = 660Hz sine ပဲ ရှိရမယ် — 3kHz အထက် highpass ဖြတ်ရင် noise (မူရင်းအသံ)
+    # ပါလာရင် အသံကျန်မယ်; မပါရင် တိတ်ဆိတ်နီးပါး ဖြစ်ရမယ်
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-i", out,
+                        "-af", "highpass=f=3000,volumedetect",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    import re as _re
+    m = _re.search(r"mean_volume: (-?[\d.]+)", r.stderr)
+    assert m, r.stderr[-500:]
+    assert float(m.group(1)) < -50, f"original audio leaked: {m.group(1)} dB"
+
+
 if __name__ == "__main__":
     test_subtitle_chunks_burmese()
     test_srt_build()
@@ -141,4 +178,5 @@ if __name__ == "__main__":
     test_fix_pronunciation()
     test_render_smoke()
     test_auto_canvas_and_portrait_render()
+    test_no_original_audio_outside_subtitle()
     print("ALL TESTS PASS")
