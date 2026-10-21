@@ -1226,8 +1226,7 @@ if up is not None:
                  video_dur=dur(vpath), items=[], segments=None,
                  audio_path=None, sync=None, final_path=None,
                  sub_items=[], script_done=False)
-    st.video(str(vpath))
-    st.caption(f"⏱️ Duration: {fmt_clock(S['video_dur'])} ({S['video_dur']:.1f}s)")
+    st.caption(f"✅ Video ရပြီ — ⏱️ Duration: {fmt_clock(S['video_dur'])} ({S['video_dur']:.1f}s)")
 
 # ------------------------------------------------------------- step 2: script
 st.markdown("### ၂။ Director's Script")
