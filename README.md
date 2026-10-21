@@ -29,7 +29,8 @@ localStorage မှာ မှတ်ထားတယ် (Streamlit Secrets / env �
    (X/Y/W/H/Strength), 💬 Subtitle burn-in (Padauk, ကာလာ/Size/BG/နေရာ ချိန်လို့ရ),
    🖼️ Logo (4 corners, size, opacity), 🎵 BGM + Volume mix (TTS/Original/BGM),
    ⚡ Hyper-Sync (Recap မှာ video ကို narration နဲ့ကိုက် အမြန်/အနှေး ချိန်),
-   📐 16:9 / 9:16 / 1:1
+   📐 Aspect က video အချိုးအတိုင်း အလိုအလျောက် (9:16 တင်ရင် 9:16 ပဲ ထွက်),
+   💬 Subtitle က Reel/Short-safe — font အကြီး + portrait မှာ စာကြောင်းတိုတို
 
 ## Streamlit Cloud ပေါ်တင်နည်း (အခမဲ့)
 

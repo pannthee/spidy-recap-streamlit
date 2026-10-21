@@ -174,6 +174,42 @@ def dur(path):
         return 0.0
 
 
+def video_dims(path):
+    """ffprobe → (width, height) — rotation metadata ပါရင် ပြောင်းပြန်လှန်."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height",
+                        "-show_entries", "stream_tags=rotate",
+                        "-of", "default=noprint_wrappers=1", str(path)],
+                       capture_output=True, text=True)
+    w = h = 0
+    rotate = 0
+    for line in r.stdout.splitlines():
+        if line.startswith("width="):
+            w = int(line.split("=")[1] or 0)
+        elif line.startswith("height="):
+            h = int(line.split("=")[1] or 0)
+        elif "rotate=" in line:
+            try:
+                rotate = abs(int(line.split("rotate=")[1]))
+            except Exception:
+                pass
+    if not w or not h:
+        return 1920, 1080
+    if rotate in (90, 270):
+        w, h = h, w
+    return w, h
+
+
+def auto_canvas(path):
+    """video အချိုးအလိုက် canvas — 9:16 တင်ရင် 9:16 ပဲ ထွက်အောင် (settings မလို)."""
+    w, h = video_dims(path)
+    if h > w:
+        return (1080, 1920)
+    if w > h:
+        return (1920, 1080)
+    return (1080, 1080)
+
+
 def has_audio(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
                         "-show_entries", "stream=index", "-of", "csv=p=0",
@@ -204,14 +240,14 @@ def fix_pronunciation(text):
     return text
 
 
-def generate_subtitle_chunks(text, total_duration, start_time=0.0):
-    """ONC generateSubtitleChunks port — sentence split, MAX_LEN 24,
+def generate_subtitle_chunks(text, total_duration, start_time=0.0, max_len=24):
+    """ONC generateSubtitleChunks port — sentence split, max_len wrap,
     comma/space aware wrap (Unicode မဖြတ်), 2-line pairing, proportional timing."""
     if not text or total_duration <= 0:
         return []
     raw = [s for s in re.sub(r"([။!?])", r"\1\n", text).split("\n") if s.strip()]
     chunks = []
-    MAX_LEN = 24
+    MAX_LEN = max_len
     for seg in raw:
         s = seg.strip()
         while len(s) > MAX_LEN:
@@ -833,7 +869,7 @@ def _ass_time(sec):
 
 def write_ass(sub_items, path, canvas_w, canvas_h, *, font_size=45,
               color="#FFFFFF", bg_color="#000000", bg_opacity=60,
-              sub_x=10, sub_y=75):
+              sub_x=10, sub_y=75, max_len=24):
     """sub_items (timed text) → generate_subtitle_chunks ခွဲ → ASS with \\pos.
     BorderStyle=3 (opaque box) — ONC ရဲ့ bg box ပုံစံ."""
     bg_alpha = int(round((100 - bg_opacity) / 100 * 255))
@@ -845,7 +881,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: MRS,Padauk,{int(font_size)},{_ass_color(color)},&H000000FF,{_ass_color(bg_color, bg_alpha)},&H00000000,-1,0,0,0,100,100,0,0,3,1,0,7,0,0,0,1
+Style: MRS,Padauk,{int(font_size)},{_ass_color(color)},&H000000FF,{_ass_color(bg_color, bg_alpha)},&H00000000,-1,0,0,0,100,100,0,0,3,6,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -855,7 +891,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events = []
     for it in sub_items:
         span = max(0.1, it["end"] - it["start"])
-        for ch in generate_subtitle_chunks(it["text"], span, it["start"]):
+        for ch in generate_subtitle_chunks(it["text"], span, it["start"],
+                                           max_len=max_len):
             txt = ch["text"].replace("{", "(").replace("}", ")").replace("\n", r"\N")
             events.append(
                 f"Dialogue: 0,{_ass_time(ch['start'])},{_ass_time(ch['end'])},MRS,,0,0,0,,"
@@ -905,7 +942,7 @@ def render_final(S, cfg, progress_cb=None):
     progress_cb(0.0–1.0): Hyper-Sync အဆင့် 0–35%, main render 35–100%."""
     work_dir = Path(S["run_dir"])
     mode = S["mode"]
-    W, H = ASPECTS[cfg["aspect"]]
+    W, H = auto_canvas(S["video_path"])  # video အချိုးအတိုင်း အလိုအလျောက်
     src_video = S["video_path"]
     main_base, main_span = 0.0, 1.0
 
@@ -955,10 +992,19 @@ def render_final(S, cfg, progress_cb=None):
                   else f"[{base_label}]null[v1]")
         cur = "v1"
     if cfg["subs_on"] and S.get("sub_items"):
+        # Reel/Short-safe subtitle: font အကြီး (frame အမြင့်၏ ~5.2%),
+        # portrait ဆို စာကြောင်းတို (14 လုံး) + Reel UI မဖုံးအောင် အပေါ်နည်း
+        portrait = H > W
+        font_size = cfg.get("sub_size") or max(52, int(H * 0.052))
+        sub_x = cfg.get("sub_x")
+        sub_x = (5 if portrait else 10) if sub_x is None else sub_x
+        sub_y = cfg.get("sub_y")
+        sub_y = (64 if portrait else 78) if sub_y is None else sub_y
+        max_len = 14 if portrait else (18 if H == W else 24)
         ass_path = write_ass(S["sub_items"], work_dir / "subs.ass", W, H,
-                             font_size=cfg["sub_size"], color=cfg["sub_color"],
+                             font_size=font_size, color=cfg["sub_color"],
                              bg_color=cfg["sub_bg"], bg_opacity=cfg["sub_bg_op"],
-                             sub_x=cfg["sub_x"], sub_y=cfg["sub_y"])
+                             sub_x=sub_x, sub_y=sub_y, max_len=max_len)
         esc = ass_path.replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
         fc.append(f"[{cur}]ass='{esc}'[v2]")
         cur = "v2"
@@ -1315,8 +1361,8 @@ if st.button("🎬 Final Video Render လုပ်မယ်", use_container_widt
         # Render settings section ဖယ်ပြီး — မူလ default တန်ဖိုးတွေနဲ့ render မယ်
         cfg = dict(aspect="16:9", mirror=True, color_tone="Normal (Original)",
                    hypersync=hypersync, subs_on=True, sub_color="#FFFFFF",
-                   sub_bg="#000000", sub_size=45, sub_bg_op=60, sub_x=10,
-                   sub_y=75, blur_on=True, blur_x=10, blur_y=70, blur_w=80,
+                   sub_bg="#000000", sub_size=None, sub_bg_op=60, sub_x=None,
+                   sub_y=None, blur_on=True, blur_x=10, blur_y=70, blur_w=80,
                    blur_h=25, blur_strength=25, logo_path=None,
                    logo_pos="top-right", logo_size=15, logo_opacity=100,
                    bgm_path=None, tts_vol=100,

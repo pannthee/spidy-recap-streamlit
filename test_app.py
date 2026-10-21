@@ -96,6 +96,40 @@ def test_render_smoke():
     assert 5.5 < d < 6.6, d
 
 
+def test_auto_canvas_and_portrait_render():
+    """9:16 video → canvas 1080x1920 + final render လည်း portrait ပဲ ထွက်."""
+    wd = HERE / "work" / "portrait"
+    wd.mkdir(parents=True, exist_ok=True)
+    vid = wd / "src.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                    "-i", "testsrc2=size=360x640:rate=30:duration=4",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest", str(vid)], check=True)
+    assert app.auto_canvas(str(vid)) == (1080, 1920)
+    S = {"run_dir": str(wd), "mode": "subtitle", "video_path": str(vid),
+         "sync": None, "audio_path": None,
+         "sub_items": [{"start": 0.5, "end": 3.5,
+                        "text": "ဒါက portrait စမ်းသပ်စာတန်း ဖြစ်ပါတယ်။ ဖတ်ရလွယ်ရမယ်။"}]}
+    cfg = dict(aspect="16:9", mirror=False, color_tone="Normal (Original)",
+               hypersync=False, subs_on=True, sub_color="#FFFFFF",
+               sub_bg="#000000", sub_size=None, sub_bg_op=60, sub_x=None,
+               sub_y=None, blur_on=False, blur_x=10, blur_y=70, blur_w=80,
+               blur_h=25, blur_strength=25, logo_path=None,
+               logo_pos="top-right", logo_size=15, logo_opacity=100,
+               bgm_path=None, tts_vol=100, orig_vol=100, bgm_vol=20)
+    out = app.render_final(S, cfg)
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height",
+                        "-of", "csv=p=0", out], capture_output=True, text=True)
+    assert r.stdout.strip() == "1080,1920", r.stdout
+    # ASS font size auto for portrait must be big (>= 90)
+    ass = (wd / "subs.ass").read_text(encoding="utf-8")
+    import re as _re
+    m = _re.search(r"Style: MRS,Padauk,(\d+)", ass)
+    assert m and int(m.group(1)) >= 90, ass[:400]
+
+
 if __name__ == "__main__":
     test_subtitle_chunks_burmese()
     test_srt_build()
@@ -104,4 +138,5 @@ if __name__ == "__main__":
     test_ass_write()
     test_fix_pronunciation()
     test_render_smoke()
+    test_auto_canvas_and_portrait_render()
     print("ALL TESTS PASS")
