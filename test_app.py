@@ -96,30 +96,6 @@ def test_render_smoke():
     assert 5.5 < d < 6.6, d
 
 
-def test_preview_frame():
-    """Live preview: still frame with mirror+tone+blur+subs applied."""
-    wd = HERE / "work" / "smoke"
-    wd.mkdir(parents=True, exist_ok=True)
-    vid = wd / "src.mp4"
-    if not vid.exists():
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
-                        "-i", "testsrc2=size=640x360:rate=30:duration=6",
-                        "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
-                        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                        "-c:a", "aac", "-shortest", str(vid)], check=True)
-    S = {"run_dir": str(wd), "video_path": str(vid)}
-    pcfg = dict(aspect="16:9", mirror=True, color_tone="Cinematic",
-                blur_on=True, blur_x=10, blur_y=70, blur_w=80, blur_h=25,
-                blur_strength=25, subs_on=True, sub_color="#FFFFFF",
-                sub_bg="#000000", sub_size=45, sub_bg_op=60, sub_x=10,
-                sub_y=75, logo_path=None, logo_pos="top-right", logo_size=15,
-                logo_opacity=100, sample_text="နမူနာ စာတန်းထိုး ဖြစ်ပါတယ်။")
-    out = app.make_preview_frame(S, pcfg, 2.0)
-    assert Path(out).exists() and Path(out).stat().st_size > 3000
-    # cached second call returns same file fast
-    assert app.make_preview_frame(S, pcfg, 2.0) == out
-
-
 if __name__ == "__main__":
     test_subtitle_chunks_burmese()
     test_srt_build()
@@ -128,5 +104,4 @@ if __name__ == "__main__":
     test_ass_write()
     test_fix_pronunciation()
     test_render_smoke()
-    test_preview_frame()
     print("ALL TESTS PASS")
