@@ -869,7 +869,7 @@ def _ass_time(sec):
 
 def write_ass(sub_items, path, canvas_w, canvas_h, *, font_size=45,
               color="#FFFFFF", bg_color="#000000", bg_opacity=60,
-              sub_x=10, sub_y=75, max_len=24):
+              sub_x=10, sub_y=75, max_len=24, center=True):
     """sub_items (timed text) → generate_subtitle_chunks ခွဲ → ASS with \\pos.
     BorderStyle=3 (opaque box) — ONC ရဲ့ bg box ပုံစံ."""
     bg_alpha = int(round((100 - bg_opacity) / 100 * 255))
@@ -894,9 +894,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for ch in generate_subtitle_chunks(it["text"], span, it["start"],
                                            max_len=max_len):
             txt = ch["text"].replace("{", "(").replace("}", ")").replace("\n", r"\N")
+            if center:  # အလယ်တည့်တည့် — \an8 = top-center anchor
+                tag = f"{{\\an8\\pos({canvas_w // 2},{py})}}"
+            else:
+                tag = f"{{\\pos({px},{py})}}"
             events.append(
                 f"Dialogue: 0,{_ass_time(ch['start'])},{_ass_time(ch['end'])},MRS,,0,0,0,,"
-                f"{{\\pos({px},{py})}}{txt}")
+                f"{tag}{txt}")
     Path(path).write_text(header + "\n".join(events) + "\n", encoding="utf-8")
     return str(path)
 
@@ -943,6 +947,7 @@ def render_final(S, cfg, progress_cb=None):
     work_dir = Path(S["run_dir"])
     mode = S["mode"]
     W, H = auto_canvas(S["video_path"])  # video အချိုးအတိုင်း အလိုအလျောက်
+    portrait = H > W
     src_video = S["video_path"]
     main_base, main_span = 0.0, 1.0
 
@@ -977,10 +982,19 @@ def render_final(S, cfg, progress_cb=None):
     if tone:
         vf.append(tone)
     if cfg["blur_on"]:
-        bw = max(1, int(cfg["blur_w"] / 100 * W))
-        bh = max(1, int(cfg["blur_h"] / 100 * H))
-        bx = int(cfg["blur_x"] / 100 * W)
-        by = int(cfg["blur_y"] / 100 * H)
+        # မူရင်း hardcoded subtitle ကို ဖုံးအောင် — full-width band (အောက်ပိုင်း)
+        _bx = cfg.get("blur_x")
+        _bw = cfg.get("blur_w")
+        _by = cfg.get("blur_y")
+        _bh = cfg.get("blur_h")
+        bx_pct = 0 if _bx is None else _bx
+        bw_pct = 100 if _bw is None else _bw
+        by_pct = (68 if portrait else 72) if _by is None else _by
+        bh_pct = (32 if portrait else 28) if _bh is None else _bh
+        bw = max(1, int(bw_pct / 100 * W))
+        bh = max(1, int(bh_pct / 100 * H))
+        bx = int(bx_pct / 100 * W)
+        by = int(by_pct / 100 * H)
         fc.append(f"[{base_label}]{','.join(vf)},split[va][vb]" if vf
                   else f"[{base_label}]split[va][vb]")
         fc.append(f"[vb]crop={bw}:{bh}:{bx}:{by},"
@@ -993,18 +1007,16 @@ def render_final(S, cfg, progress_cb=None):
         cur = "v1"
     if cfg["subs_on"] and S.get("sub_items"):
         # Reel/Short-safe subtitle: font အကြီး (frame အမြင့်၏ ~5.2%),
-        # portrait ဆို စာကြောင်းတို (14 လုံး) + Reel UI မဖုံးအောင် အပေါ်နည်း
-        portrait = H > W
+        # portrait ဆို စာကြောင်းတို (14 လုံး) + Reel UI မဖုံးအောင် အပေါ်နည်း,
+        # အမြဲ အလယ် (center)
         font_size = cfg.get("sub_size") or max(52, int(H * 0.052))
-        sub_x = cfg.get("sub_x")
-        sub_x = (5 if portrait else 10) if sub_x is None else sub_x
         sub_y = cfg.get("sub_y")
         sub_y = (64 if portrait else 78) if sub_y is None else sub_y
         max_len = 14 if portrait else (18 if H == W else 24)
         ass_path = write_ass(S["sub_items"], work_dir / "subs.ass", W, H,
                              font_size=font_size, color=cfg["sub_color"],
                              bg_color=cfg["sub_bg"], bg_opacity=cfg["sub_bg_op"],
-                             sub_x=sub_x, sub_y=sub_y, max_len=max_len)
+                             sub_y=sub_y, max_len=max_len, center=True)
         esc = ass_path.replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
         fc.append(f"[{cur}]ass='{esc}'[v2]")
         cur = "v2"
@@ -1362,8 +1374,8 @@ if st.button("🎬 Final Video Render လုပ်မယ်", use_container_widt
         cfg = dict(aspect="16:9", mirror=True, color_tone="Normal (Original)",
                    hypersync=hypersync, subs_on=True, sub_color="#FFFFFF",
                    sub_bg="#000000", sub_size=None, sub_bg_op=60, sub_x=None,
-                   sub_y=None, blur_on=True, blur_x=10, blur_y=70, blur_w=80,
-                   blur_h=25, blur_strength=25, logo_path=None,
+                   sub_y=None, blur_on=True, blur_x=None, blur_y=None,
+                   blur_w=None, blur_h=None, blur_strength=30, logo_path=None,
                    logo_pos="top-right", logo_size=15, logo_opacity=100,
                    bgm_path=None, tts_vol=100,
                    orig_vol=(10 if mode in ("dubbing", "recap_dub") else

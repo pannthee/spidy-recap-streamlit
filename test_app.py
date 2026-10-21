@@ -128,6 +128,8 @@ def test_auto_canvas_and_portrait_render():
     import re as _re
     m = _re.search(r"Style: MRS,Padauk,(\d+)", ass)
     assert m and int(m.group(1)) >= 90, ass[:400]
+    # subtitles centered: \an8 + \pos at canvas center x=540 (1080 wide)
+    assert "\\an8\\pos(540," in ass, ass[:600]
 
 
 if __name__ == "__main__":
