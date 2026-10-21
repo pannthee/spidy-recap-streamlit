@@ -1208,14 +1208,10 @@ st.caption({
     "recap_dub": "Narrator ဇာတ်ကြောင်းပြန်ခြင်းနှင့် ဇာတ်ကောင်အသံထပ်သွင်းခြင်းကို ပေါင်းစပ်ပေးမည်။",
 }[mode])
 
-c1, c2 = st.columns(2)
-with c1:
-    script_style = st.selectbox("Script Style", [k for k, _l, _p in SCRIPT_STYLES],
-                                format_func=lambda k: dict((a, b) for a, b, _p in SCRIPT_STYLES)[k],
-                                disabled=(mode != "recap"))
-with c2:
-    src_lang = st.selectbox("မူရင်းဘာသာစကား (Whisper)", [l for _l, l in SRC_LANGS],
-                            format_func=lambda l: dict((v, k) for k, v in SRC_LANGS)[l])
+# Script Style မလို — Recap မှာ ပုံသေ Movie Recap style ပဲ သုံးမယ်
+script_style = "recap"
+src_lang = st.selectbox("မူရင်းဘာသာစကား (Whisper)", [l for _l, l in SRC_LANGS],
+                        format_func=lambda l: dict((v, k) for k, v in SRC_LANGS)[l])
 
 up = st.file_uploader("Video ဖိုင် (mp4/mov/mkv/webm)", type=["mp4", "mov", "mkv", "webm"])
 if up is not None:
