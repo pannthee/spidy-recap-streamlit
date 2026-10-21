@@ -281,6 +281,34 @@ def atempo_chain(rate):
     return ",".join(parts)
 
 
+def run_progress(cmd, total_dur, progress_cb=None, base=0.0, span=1.0):
+    """ffmpeg ကို -progress နဲ့ run → out_time ကနေ % တွက် (Render loading ပြဖို့)."""
+    if not progress_cb or not total_dur or total_dur <= 0:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError("ffmpeg: " + (r.stderr or "")[-600:])
+        return
+    full = [cmd[0]] + ["-progress", "pipe:1", "-nostats"] + list(cmd[1:])
+    p = subprocess.Popen(full, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    last = -1.0
+    for line in p.stdout:
+        if line.startswith("out_time_ms="):
+            try:
+                t = int(line.strip().split("=", 1)[1]) / 1e6
+            except Exception:
+                continue
+            val = base + span * max(0.0, min(1.0, t / total_dur))
+            if val - last >= 0.01:
+                last = val
+                progress_cb(val)
+    err = p.stderr.read() if p.stderr else ""
+    p.wait()
+    if p.returncode != 0:
+        raise RuntimeError("ffmpeg: " + (err or "")[-600:])
+    progress_cb(base + span)
+
+
 def silence(path, seconds, sr=24000):
     run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
          f"anullsrc=r={sr}:cl=mono", "-t", f"{max(0.05, seconds):.3f}",
@@ -846,7 +874,7 @@ def collect_sub_items(mode, items, sync=None):
 
 
 # ------------------------------------------------------------- render (step 5)
-def make_hypersync_video(video_path, sync, canvas, work_dir):
+def make_hypersync_video(video_path, sync, canvas, work_dir, progress_cb=None):
     """⚡ Hyper-Sync — scene တစ်ခုချင်းကို narration အရှည်နဲ့ setpts ချိန် ဆက်."""
     W, H = canvas
     seg_files = []
@@ -862,6 +890,8 @@ def make_hypersync_video(video_path, sync, canvas, work_dir):
              "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
              str(seg)])
         seg_files.append(seg)
+        if progress_cb:
+            progress_cb((i + 1) / len(sync))
     listfile = Path(work_dir) / "hs_concat.txt"
     listfile.write_text("".join(f"file '{p.resolve()}'\n" for p in seg_files))
     out = Path(work_dir) / "synced.mp4"
@@ -870,15 +900,20 @@ def make_hypersync_video(video_path, sync, canvas, work_dir):
     return str(out)
 
 
-def render_final(S, cfg):
-    """ffmpeg render → final.mp4 (တကယ့် MP4, browser WebM မဟုတ်)."""
+def render_final(S, cfg, progress_cb=None):
+    """ffmpeg render → final.mp4 (တကယ့် MP4, browser WebM မဟုတ်).
+    progress_cb(0.0–1.0): Hyper-Sync အဆင့် 0–35%, main render 35–100%."""
     work_dir = Path(S["run_dir"])
     mode = S["mode"]
     W, H = ASPECTS[cfg["aspect"]]
     src_video = S["video_path"]
+    main_base, main_span = 0.0, 1.0
 
     if cfg["hypersync"] and mode == "recap" and S.get("sync"):
-        src_video = make_hypersync_video(src_video, S["sync"], (W, H), work_dir)
+        src_video = make_hypersync_video(
+            src_video, S["sync"], (W, H), work_dir,
+            progress_cb=(lambda f: progress_cb(0.35 * f)) if progress_cb else None)
+        main_base, main_span = 0.35, 0.65
 
     inputs = ["-i", src_video]
     idx_nar = idx_bgm = idx_logo = None
@@ -973,9 +1008,10 @@ def render_final(S, cfg):
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
             "-r", "30", str(out)])
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError("Render မရဘူး — ffmpeg: " + r.stderr[-600:])
+    try:
+        run_progress(cmd, target, progress_cb, main_base, main_span)
+    except RuntimeError as e:
+        raise RuntimeError("Render မရဘူး — " + str(e))
     return str(out)
 
 
@@ -1137,8 +1173,55 @@ if up is not None:
     st.video(str(vpath))
     st.caption(f"⏱️ Duration: {fmt_clock(S['video_dur'])} ({S['video_dur']:.1f}s)")
 
+st.markdown("### ၂။ Render Settings")
+with st.expander("🎛️ Render Settings", expanded=True):
+    rc1, rc2, rc3 = st.columns(3)
+    with rc1:
+        aspect = st.selectbox("📐 Aspect Ratio", list(ASPECTS.keys()))
+        mirror = st.checkbox("🪞 Copyright Bypass (Mirror)", value=True)
+        color_tone = st.selectbox("🎨 Color Tone", list(COLOR_TONES.keys()))
+        hypersync = st.checkbox("⚡ Hyper-Sync (Recap: video ကို အသံနဲ့ကိုက် ချိန်)",
+                                value=True)
+    with rc2:
+        subs_on = st.checkbox("💬 Subtitle Burn-in", value=True)
+        sub_color = st.color_picker("စာသား ကာလာ", "#FFFFFF")
+        sub_bg = st.color_picker("Background ကာလာ", "#000000")
+        sub_size = st.slider("Font Size", 24, 80, 45)
+        sub_bg_op = st.slider("Background Opacity %", 0, 100, 60)
+        sub_x = st.slider("Subtitle X %", 0, 90, 10)
+        sub_y = st.slider("Subtitle Y %", 0, 95, 75)
+    with rc3:
+        blur_on = st.checkbox("🌫️ မူရင်း Subtitle နေရာ Blur", value=True)
+        blur_x = st.slider("Blur X %", 0, 90, 10)
+        blur_y = st.slider("Blur Y %", 0, 95, 70)
+        blur_w = st.slider("Blur W %", 5, 100, 80)
+        blur_h = st.slider("Blur H %", 5, 60, 25)
+        blur_strength = st.slider("Blur Strength", 2, 60, 25)
+    st.markdown("**🖼️ Logo (Watermark)**")
+    lc1, lc2, lc3, lc4 = st.columns(4)
+    with lc1:
+        logo_up = st.file_uploader("Logo PNG/JPG", type=["png", "jpg", "jpeg"])
+    with lc2:
+        logo_pos = st.selectbox("Position", LOGO_POSITIONS, index=1)
+    with lc3:
+        logo_size = st.slider("Logo Size %", 5, 40, 15)
+    with lc4:
+        logo_opacity = st.slider("Logo Opacity %", 10, 100, 100)
+    st.markdown("**🎵 Audio Mix**")
+    ac1, ac2, ac3 = st.columns(3)
+    with ac1:
+        tts_vol = st.slider("🔊 TTS Volume %", 0, 150, 100)
+    with ac2:
+        orig_vol = st.slider("🎞️ Original Volume %", 0, 100,
+                             10 if mode in ("dubbing", "recap_dub") else
+                             (100 if mode == "subtitle" else 0))
+    with ac3:
+        bgm_vol = st.slider("🎵 BGM Volume %", 0, 100, 20)
+    bgm_up = st.file_uploader("BGM ဖိုင် (mp3/wav)", type=["mp3", "wav", "m4a"])
+
+
 # ------------------------------------------------------------- step 2: script
-st.markdown("### ၂။ Director's Script")
+st.markdown("### ၃။ Director's Script")
 if st.button("✨ Script ထုတ်မယ် (Groq transcribe → Gemini script)",
              use_container_width=True, disabled=not S["video_path"]):
     if not groq_key:
@@ -1236,7 +1319,7 @@ if S["items"]:
                       key="sk_tags")
 
 # ------------------------------------------------------------- step 3: audio
-st.markdown("### ၃။ အသံထုတ် (TTS)")
+st.markdown("### ၄။ အသံထုတ် (TTS)")
 if mode == "subtitle":
     st.info("💬 Subtitle mode — အသံအသစ် မထုတ်ဘူး (မူရင်းအသံ အတိုင်းထားမယ်)")
 else:
@@ -1267,52 +1350,7 @@ else:
                            file_name="narration.mp3", mime="audio/mpeg")
 
 # ------------------------------------------------------------- step 4: render
-st.markdown("### ၄။ Render Settings + Final Video")
-with st.expander("🎛️ Render Settings", expanded=True):
-    rc1, rc2, rc3 = st.columns(3)
-    with rc1:
-        aspect = st.selectbox("📐 Aspect Ratio", list(ASPECTS.keys()))
-        mirror = st.checkbox("🪞 Copyright Bypass (Mirror)", value=True)
-        color_tone = st.selectbox("🎨 Color Tone", list(COLOR_TONES.keys()))
-        hypersync = st.checkbox("⚡ Hyper-Sync (Recap: video ကို အသံနဲ့ကိုက် ချိန်)",
-                                value=True)
-    with rc2:
-        subs_on = st.checkbox("💬 Subtitle Burn-in", value=True)
-        sub_color = st.color_picker("စာသား ကာလာ", "#FFFFFF")
-        sub_bg = st.color_picker("Background ကာလာ", "#000000")
-        sub_size = st.slider("Font Size", 24, 80, 45)
-        sub_bg_op = st.slider("Background Opacity %", 0, 100, 60)
-        sub_x = st.slider("Subtitle X %", 0, 90, 10)
-        sub_y = st.slider("Subtitle Y %", 0, 95, 75)
-    with rc3:
-        blur_on = st.checkbox("🌫️ မူရင်း Subtitle နေရာ Blur", value=True)
-        blur_x = st.slider("Blur X %", 0, 90, 10)
-        blur_y = st.slider("Blur Y %", 0, 95, 70)
-        blur_w = st.slider("Blur W %", 5, 100, 80)
-        blur_h = st.slider("Blur H %", 5, 60, 25)
-        blur_strength = st.slider("Blur Strength", 2, 60, 25)
-    st.markdown("**🖼️ Logo (Watermark)**")
-    lc1, lc2, lc3, lc4 = st.columns(4)
-    with lc1:
-        logo_up = st.file_uploader("Logo PNG/JPG", type=["png", "jpg", "jpeg"])
-    with lc2:
-        logo_pos = st.selectbox("Position", LOGO_POSITIONS, index=1)
-    with lc3:
-        logo_size = st.slider("Logo Size %", 5, 40, 15)
-    with lc4:
-        logo_opacity = st.slider("Logo Opacity %", 10, 100, 100)
-    st.markdown("**🎵 Audio Mix**")
-    ac1, ac2, ac3 = st.columns(3)
-    with ac1:
-        tts_vol = st.slider("🔊 TTS Volume %", 0, 150, 100)
-    with ac2:
-        orig_vol = st.slider("🎞️ Original Volume %", 0, 100,
-                             10 if mode in ("dubbing", "recap_dub") else
-                             (100 if mode == "subtitle" else 0))
-    with ac3:
-        bgm_vol = st.slider("🎵 BGM Volume %", 0, 100, 20)
-    bgm_up = st.file_uploader("BGM ဖိုင် (mp3/wav)", type=["mp3", "wav", "m4a"])
-
+st.markdown("### ၅။ Final Video Render")
 can_render = bool(S["video_path"] and S["items"] and
                   (mode == "subtitle" or S.get("audio_path")))
 if st.button("🎬 Final Video Render လုပ်မယ်", use_container_width=True,
@@ -1335,8 +1373,13 @@ if st.button("🎬 Final Video Render လုပ်မယ်", use_container_widt
                    logo_pos=logo_pos, logo_size=logo_size,
                    logo_opacity=logo_opacity, bgm_path=bgm_path,
                    tts_vol=tts_vol, orig_vol=orig_vol, bgm_vol=bgm_vol)
-        with st.spinner("Render လုပ်နေတယ်... (video ရှည်ရင် ကြာနိုင်တယ်)"):
-            S["final_path"] = render_final(S, cfg)
+        bar = st.progress(0.0, "🎬 Render စတင်နေတယ်... 0%")
+
+        def _rcb(p):
+            p = min(1.0, max(0.0, p))
+            bar.progress(p, f"🎬 Render လုပ်နေတယ်... {int(p * 100)}%")
+        S["final_path"] = render_final(S, cfg, progress_cb=_rcb)
+        bar.progress(1.0, "🎬 Render ပြီးပြီ ✅ 100%")
         st.success("Render ပြီးပြီ ✅")
     except Exception as e:
         st.error(str(e))
