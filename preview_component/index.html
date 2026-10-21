@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>
+  html,body { margin:0; padding:0; background:transparent; overflow:hidden;
+    font-family: sans-serif; }
+  #wrap { position:relative; width:100%; user-select:none; }
+  #img { width:100%; display:block; border-radius:10px; }
+  .box { position:absolute; box-sizing:border-box; border-radius:6px;
+    touch-action:none; cursor:move; }
+  .box .tag { position:absolute; top:2px; left:6px; font-size:11px; font-weight:700;
+    color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.9); letter-spacing:.05em;
+    pointer-events:none; }
+  #sub { border:2px solid #34d399; background:rgba(52,211,153,.16); }
+  #blur { border:2px dashed #22d3ee; background:rgba(34,211,238,.14); }
+  .handle { position:absolute; right:-9px; bottom:-9px; width:20px; height:20px;
+    border-radius:50%; background:#22d3ee; border:2px solid #083344;
+    cursor:nwse-resize; touch-action:none; }
+</style></head>
+<body>
+<div id="wrap">
+  <img id="img" alt="preview">
+  <div class="box" id="sub"><span class="tag">SUBTITLE — ဆွဲရွှေ့</span></div>
+  <div class="box" id="blur"><span class="tag">BLUR — ဆွဲရွှေ့ / ထောင့်က ဆွဲဆန့်</span>
+    <div class="handle" id="blurHandle"></div>
+  </div>
+</div>
+<script>
+  var wrap = document.getElementById('wrap');
+  var img = document.getElementById('img');
+  var boxes = { sub: document.getElementById('sub'), blur: document.getElementById('blur') };
+  var state = null;      // {sub:{x,y,w,h}, blur:{x,y,w,h}} in %
+  var drag = null;
+
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), '*');
+  }
+  function setHeight() {
+    if (img.clientHeight > 0) send('streamlit:setFrameHeight', { height: wrap.offsetHeight + 4 });
+  }
+  function place(name) {
+    var b = boxes[name], r = state[name];
+    b.style.left = r.x + '%'; b.style.top = r.y + '%';
+    b.style.width = r.w + '%'; b.style.height = r.h + '%';
+    b.style.display = (name === 'blur' && !state.blurOn) ? 'none' : 'block';
+  }
+  function render() {
+    if (!state) return;
+    img.src = 'data:image/jpeg;base64,' + state.image_b64;
+    place('sub'); place('blur');
+    img.onload = setHeight;
+    setHeight();
+  }
+  function pct(e) {
+    var rect = wrap.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) / rect.width * 100,
+             y: (e.clientY - rect.top) / rect.height * 100 };
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function startDrag(e, name, mode) {
+    e.preventDefault(); e.stopPropagation();
+    var p = pct(e), r = state[name];
+    drag = { name: name, mode: mode, startX: p.x, startY: p.y,
+             orig: { x: r.x, y: r.y, w: r.w, h: r.h } };
+  }
+  Object.keys(boxes).forEach(function(name) {
+    boxes[name].addEventListener('pointerdown', function(e) { startDrag(e, name, 'move'); });
+  });
+  document.getElementById('blurHandle').addEventListener('pointerdown',
+    function(e) { startDrag(e, 'blur', 'resize'); });
+  window.addEventListener('pointermove', function(e) {
+    if (!drag) return;
+    var p = pct(e), r = state[drag.name], o = drag.orig;
+    if (drag.mode === 'move') {
+      r.x = clamp(o.x + (p.x - drag.startX), 0, 100 - o.w);
+      r.y = clamp(o.y + (p.y - drag.startY), 0, 100 - o.h);
+    } else {
+      r.w = clamp(o.w + (p.x - drag.startX), 5, 100 - o.x);
+      r.h = clamp(o.h + (p.y - drag.startY), 5, 100 - o.y);
+    }
+    place(drag.name);
+  });
+  window.addEventListener('pointerup', function() {
+    if (!drag) return;
+    drag = null;
+    var round = function(o) { return { x: +o.x.toFixed(1), y: +o.y.toFixed(1),
+                                       w: +o.w.toFixed(1), h: +o.h.toFixed(1) }; };
+    send('streamlit:setComponentValue', { value: { sub: round(state.sub), blur: round(state.blur) } });
+  });
+  window.addEventListener('message', function(event) {
+    var d = event.data;
+    if (d && d.type === 'streamlit:render') { state = d.args; render(); }
+  });
+  window.addEventListener('resize', setHeight);
+  send('streamlit:componentReady', { apiVersion: 1 });
+</script>
+</body>
+</html>

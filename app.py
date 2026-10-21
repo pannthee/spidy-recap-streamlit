@@ -873,6 +873,80 @@ def collect_sub_items(mode, items, sync=None):
             for d in items]
 
 
+# ------------------------------------------------------------- live preview
+def make_preview_frame(S, pcfg, second):
+    """👁️ Live Preview — render chain အစစ်နဲ့ still frame တစ်ခု ထုတ်
+    (scale/mirror/tone/blur/subs/logo အကုန် ထင်ဟပ်). settings hash နဲ့ cache."""
+    run_dir = Path(S["run_dir"])
+    W, H = ASPECTS[pcfg["aspect"]]
+    key_src = json.dumps({k: pcfg.get(k) for k in sorted(pcfg)},
+                         sort_keys=True, default=str) + \
+        f"|{S['video_path']}|{second:.2f}|" + \
+        (str(os.path.getmtime(pcfg["logo_path"])) if pcfg.get("logo_path") else "")
+    h = hashlib.md5(key_src.encode()).hexdigest()[:12]
+    out = run_dir / f"preview_{h}.jpg"
+    if out.exists():
+        return str(out)
+
+    inputs = ["-ss", f"{second:.2f}", "-i", S["video_path"]]
+    idx_logo = None
+    if pcfg.get("logo_path"):
+        idx_logo = 1
+        inputs += ["-i", pcfg["logo_path"]]
+
+    vf = [f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+          f"crop={W}:{H},setsar=1"]
+    if pcfg["mirror"]:
+        vf.append("hflip")
+    tone = COLOR_TONES.get(pcfg["color_tone"], "")
+    if tone:
+        vf.append(tone)
+    fc, cur = [], "0:v"
+    if pcfg["blur_on"]:
+        bw = max(1, int(pcfg["blur_w"] / 100 * W))
+        bh = max(1, int(pcfg["blur_h"] / 100 * H))
+        bx = int(pcfg["blur_x"] / 100 * W)
+        by = int(pcfg["blur_y"] / 100 * H)
+        fc.append(f"[{cur}]{','.join(vf)},split[va][vb]")
+        fc.append(f"[vb]crop={bw}:{bh}:{bx}:{by},"
+                  f"gblur=sigma={max(2, pcfg['blur_strength'])}[blurred]")
+        fc.append(f"[va][blurred]overlay={bx}:{by}[v1]")
+        cur = "v1"
+    else:
+        fc.append(f"[{cur}]{','.join(vf)}[v1]")
+        cur = "v1"
+    if pcfg["subs_on"]:
+        sample = pcfg.get("sample_text") or "ဒါက နမူနာ စာတန်းထိုး ဖြစ်ပါတယ်။"
+        ass_path = write_ass([{"start": 0.0, "end": 2.0, "text": sample}],
+                             run_dir / f"preview_{h}.ass", W, H,
+                             font_size=pcfg["sub_size"], color=pcfg["sub_color"],
+                             bg_color=pcfg["sub_bg"],
+                             bg_opacity=pcfg["sub_bg_op"],
+                             sub_x=pcfg["sub_x"], sub_y=pcfg["sub_y"])
+        esc = ass_path.replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
+        fc.append(f"[{cur}]ass='{esc}'[v2]")
+        cur = "v2"
+    if idx_logo is not None:
+        lw = max(16, int(pcfg["logo_size"] / 100 * W))
+        pos = {"top-left": "24:24", "top-right": "W-w-24:24",
+               "bottom-left": "24:H-h-24",
+               "bottom-right": "W-w-24:H-h-24"}[pcfg["logo_pos"]]
+        fc.append(f"[{idx_logo}:v]scale={lw}:-1,format=rgba,"
+                  f"colorchannelmixer=aa={pcfg['logo_opacity'] / 100:.2f}[logo]")
+        fc.append(f"[{cur}][logo]overlay={pos}[vout]")
+        cur = "vout"
+    else:
+        fc.append(f"[{cur}]null[vout]")
+    fc.append("[vout]scale='min(854,iw)':-2[pout]")
+    cmd = (["ffmpeg", "-y", "-v", "error"] + inputs +
+           ["-filter_complex", ";".join(fc), "-map", "[pout]",
+            "-frames:v", "1", "-q:v", "3", str(out)])
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("Preview ထုတ်မရဘူး — ffmpeg: " + r.stderr[-400:])
+    return str(out)
+
+
 # ------------------------------------------------------------- render (step 5)
 def make_hypersync_video(video_path, sync, canvas, work_dir, progress_cb=None):
     """⚡ Hyper-Sync — scene တစ်ခုချင်းကို narration အရှည်နဲ့ setpts ချိန် ဆက်."""
@@ -1014,6 +1088,14 @@ def render_final(S, cfg, progress_cb=None):
         raise RuntimeError("Render မရဘူး — " + str(e))
     return str(out)
 
+
+# ------------------------------------------------------------- drag component
+try:
+    import streamlit.components.v1 as _components
+    _drag_preview = _components.declare_component(
+        "drag_preview", path=str(Path(__file__).parent / "preview_component"))
+except Exception:
+    _drag_preview = None
 
 # ------------------------------------------------------------------ UI
 S = st.session_state
@@ -1188,14 +1270,14 @@ with st.expander("🎛️ Render Settings", expanded=True):
         sub_bg = st.color_picker("Background ကာလာ", "#000000")
         sub_size = st.slider("Font Size", 24, 80, 45)
         sub_bg_op = st.slider("Background Opacity %", 0, 100, 60)
-        sub_x = st.slider("Subtitle X %", 0, 90, 10)
-        sub_y = st.slider("Subtitle Y %", 0, 95, 75)
+        sub_x = st.slider("Subtitle X %", 0, 90, 10, key="w_sub_x")
+        sub_y = st.slider("Subtitle Y %", 0, 95, 75, key="w_sub_y")
     with rc3:
         blur_on = st.checkbox("🌫️ မူရင်း Subtitle နေရာ Blur", value=True)
-        blur_x = st.slider("Blur X %", 0, 90, 10)
-        blur_y = st.slider("Blur Y %", 0, 95, 70)
-        blur_w = st.slider("Blur W %", 5, 100, 80)
-        blur_h = st.slider("Blur H %", 5, 60, 25)
+        blur_x = st.slider("Blur X %", 0, 90, 10, key="w_blur_x")
+        blur_y = st.slider("Blur Y %", 0, 95, 70, key="w_blur_y")
+        blur_w = st.slider("Blur W %", 5, 100, 80, key="w_blur_w")
+        blur_h = st.slider("Blur H %", 5, 60, 25, key="w_blur_h")
         blur_strength = st.slider("Blur Strength", 2, 60, 25)
     st.markdown("**🖼️ Logo (Watermark)**")
     lc1, lc2, lc3, lc4 = st.columns(4)
@@ -1218,6 +1300,62 @@ with st.expander("🎛️ Render Settings", expanded=True):
     with ac3:
         bgm_vol = st.slider("🎵 BGM Volume %", 0, 100, 20)
     bgm_up = st.file_uploader("BGM ဖိုင် (mp3/wav)", type=["mp3", "wav", "m4a"])
+    st.divider()
+    show_preview = st.checkbox(
+        "👁️ Live Preview — ပြင်တာတွေ frame ပေါ်မှာ တန်းမြင် + box တွေ လက်နဲ့ ဆွဲချိန်",
+        value=True)
+    logo_path_pv = None
+    if logo_up is not None and S["video_path"]:
+        logo_path_pv = str(Path(S["run_dir"]) /
+                           ("logo" + Path(logo_up.name).suffix.lower()))
+        Path(logo_path_pv).write_bytes(logo_up.getvalue())
+    if show_preview:
+        if not S["video_path"]:
+            st.caption("🎬 Video အရင်တင်ပြီးမှ Live Preview မြင်ရမယ်")
+        else:
+            pv_sec = st.slider(
+                "⏱️ Preview အချိန် (စက္ကန့်)", 0.0,
+                max(0.5, float(S["video_dur"])),
+                min(5.0, float(S["video_dur"])), 0.5)
+            _sample = (S["items"][0]["text"] if S.get("items")
+                       else "ဒါက နမူနာ စာတန်းထိုး ဖြစ်ပါတယ်။ နောက်တစ်ကြောင်းလည်း ပါမယ်။")
+            pcfg = dict(aspect=aspect, mirror=mirror, color_tone=color_tone,
+                        blur_on=blur_on, blur_x=blur_x, blur_y=blur_y,
+                        blur_w=blur_w, blur_h=blur_h, blur_strength=blur_strength,
+                        subs_on=subs_on, sub_color=sub_color, sub_bg=sub_bg,
+                        sub_size=sub_size, sub_bg_op=sub_bg_op,
+                        sub_x=sub_x, sub_y=sub_y, logo_path=logo_path_pv,
+                        logo_pos=logo_pos, logo_size=logo_size,
+                        logo_opacity=logo_opacity, sample_text=_sample)
+            try:
+                pv_img = make_preview_frame(S, pcfg, float(pv_sec))
+                _W, _H = ASPECTS[aspect]
+                sub_h_pct = max(6.0, (2 * sub_size * 1.5) / _H * 100)
+                if _drag_preview is not None:
+                    val = _drag_preview(
+                        image_b64=base64.b64encode(
+                            Path(pv_img).read_bytes()).decode(),
+                        sub={"x": float(sub_x), "y": float(sub_y),
+                             "w": 80.0, "h": sub_h_pct},
+                        blur={"x": float(blur_x), "y": float(blur_y),
+                              "w": float(blur_w), "h": float(blur_h)},
+                        blurOn=bool(blur_on), key="drag_preview_box")
+                    if isinstance(val, dict) and val != S.get("_last_drag"):
+                        S["_last_drag"] = val
+                        st.session_state["w_sub_x"] = int(round(val["sub"]["x"]))
+                        st.session_state["w_sub_y"] = int(round(val["sub"]["y"]))
+                        st.session_state["w_blur_x"] = int(round(val["blur"]["x"]))
+                        st.session_state["w_blur_y"] = int(round(val["blur"]["y"]))
+                        st.session_state["w_blur_w"] = int(round(val["blur"]["w"]))
+                        st.session_state["w_blur_h"] = int(round(val["blur"]["h"]))
+                        st.rerun()
+                else:
+                    st.image(pv_img, use_container_width=True)
+                st.caption("💡 အစိမ်း box = Subtitle နေရာ (ဆွဲရွှေ့) • "
+                           "အပြာ box = Blur နေရာ (ဆွဲရွှေ့ + ညာအောက်ထောင့်အစက်က အရွယ်ဆန့်) "
+                           "— slider တွေနဲ့လည်း ချိန်လို့ရတယ်")
+            except Exception as e:
+                st.warning(str(e))
 
 
 # ------------------------------------------------------------- step 2: script
